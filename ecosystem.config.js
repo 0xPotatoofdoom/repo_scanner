@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'repo-scanner',
-    script: 'index.js',
+    script: 'repo_scanner.js',
     // Specify node args if needed
     node_args: '--max-old-space-size=1024',
     // Environment variables
