@@ -1,0 +1,32 @@
+github:
+  token: ${GITHUB_TOKEN}
+  # Check interval in minutes
+  checkInterval: 5
+  
+repositories:
+  # Example format for each repository entry
+  - url: https://github.com/owner1/repo1
+    keywords:
+      - security
+      - vulnerability
+      - bug
+    branches:
+      - main
+      - develop
+  
+  - url: https://github.com/owner2/repo2
+    keywords:
+      - deploy
+      - release
+    branches:
+      - main
+      
+email:
+  from: ${EMAIL_FROM}
+  to: ${EMAIL_TO}
+  smtp:
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT}
+    auth:
+      user: ${SMTP_USER}
+      pass: ${SMTP_PASS}
