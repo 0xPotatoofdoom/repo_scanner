@@ -1,9 +1,17 @@
-require('dotenv').config();
-const { Octokit } = require('@octokit/rest');
-const nodemailer = require('nodemailer');
-const yaml = require('js-yaml');
-const fs = require('fs');
-const path = require('path');
+import { Octokit } from '@octokit/rest';
+import nodemailer from 'nodemailer';
+import yaml from 'js-yaml';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+// Configure dotenv
+dotenv.config();
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class GitHubMonitor {
     constructor() {
@@ -17,7 +25,6 @@ class GitHubMonitor {
 
     loadConfig() {
         try {
-            // Load and parse YAML file
             const configFile = fs.readFileSync(path.join(__dirname, 'config.yml'), 'utf8');
             let config = yaml.load(configFile);
             
@@ -94,28 +101,102 @@ class GitHubMonitor {
         }
     }
 
+    async verifyRepository(owner, repo) {
+        try {
+            const response = await this.octokit.repos.get({
+                owner,
+                repo,
+            });
+            console.log(`✓ Repository verified: ${owner}/${repo}`);
+            console.log(`Default branch: ${response.data.default_branch}`);
+            return true;
+        } catch (error) {
+            console.error(`✗ Repository not found or not accessible: ${owner}/${repo}`);
+            console.error(`Error: ${error.message}`);
+            return false;
+        }
+    }
+
+    async getLatestCommits(owner, repo, branch) {
+        try {
+            // First verify the repository exists and is accessible
+            const repoExists = await this.verifyRepository(owner, repo);
+            if (!repoExists) {
+                return [];
+            }
+
+            // Get repository info to check default branch
+            const repoInfo = await this.octokit.repos.get({
+                owner,
+                repo
+            });
+
+            // Use default branch if no branch specified
+            const targetBranch = branch || repoInfo.data.default_branch;
+            console.log(`Fetching commits from ${owner}/${repo}:${targetBranch}`);
+
+            const response = await this.octokit.repos.listCommits({
+                owner,
+                repo,
+                sha: targetBranch,
+                per_page: 10
+            });
+            
+            console.log(`Found ${response.data.length} commits`);
+            return response.data;
+        } catch (error) {
+            if (error.status === 404) {
+                console.error(`Branch ${branch} not found in ${owner}/${repo}`);
+            } else {
+                console.error(`Error fetching commits for ${owner}/${repo}/${branch}:`, error.message);
+            }
+            return [];
+        }
+    }
+
     async checkRepository(repoConfig) {
-        const { owner, repo } = this.parseGitHubUrl(repoConfig.url);
-        
-        for (const branch of repoConfig.branches) {
-            const commits = await this.getLatestCommits(owner, repo, branch);
-            if (!commits.length) continue;
+        try {
+            const { owner, repo } = this.parseGitHubUrl(repoConfig.url);
+            console.log(`\nChecking repository: ${owner}/${repo}`);
+            
+            // Get repository info
+            const repoInfo = await this.octokit.repos.get({
+                owner,
+                repo
+            });
+            
+            // If no branches specified, use default branch
+            const branches = repoConfig.branches?.length > 0 
+                ? repoConfig.branches 
+                : [repoInfo.data.default_branch];
+            
+            for (const branch of branches) {
+                console.log(`\nChecking branch: ${branch}`);
+                const commits = await this.getLatestCommits(owner, repo, branch);
+                if (!commits.length) {
+                    console.log(`No commits found in ${branch}`);
+                    continue;
+                }
 
-            const repoKey = `${repoConfig.url}/${branch}`;
-            const lastCheckedCommitSha = this.lastCheckedCommits.get(repoKey);
+                const repoKey = `${repoConfig.url}/${branch}`;
+                const lastCheckedCommitSha = this.lastCheckedCommits.get(repoKey);
 
-            for (const commit of commits) {
-                if (commit.sha === lastCheckedCommitSha) break;
+                for (const commit of commits) {
+                    if (commit.sha === lastCheckedCommitSha) break;
 
-                const foundKeywords = this.checkCommitForKeywords(commit, repoConfig.keywords);
-                if (foundKeywords.length > 0) {
-                    await this.sendAlert(repoConfig.url, branch, commit, foundKeywords);
+                    const foundKeywords = this.checkCommitForKeywords(commit, repoConfig.keywords);
+                    if (foundKeywords.length > 0) {
+                        console.log(`Found keywords in commit ${commit.sha}: ${foundKeywords.join(', ')}`);
+                        await this.sendAlert(repoConfig.url, branch, commit, foundKeywords);
+                    }
+                }
+
+                if (commits.length > 0) {
+                    this.lastCheckedCommits.set(repoKey, commits[0].sha);
                 }
             }
-
-            if (commits.length > 0) {
-                this.lastCheckedCommits.set(repoKey, commits[0].sha);
-            }
+        } catch (error) {
+            console.error(`Error checking repository ${repoConfig.url}:`, error.message);
         }
     }
 
@@ -137,5 +218,6 @@ class GitHubMonitor {
     }
 }
 
+// Start the monitor
 const monitor = new GitHubMonitor();
 monitor.start();
